@@ -1,0 +1,13 @@
+
+So this is pretty simple. It turns on, and turns off using the kernel shutdown.
+
+You can run it simply:
+
+`sudo xm create OnOff.config`
+
+You get a message saying it was created as user domain <n>, however
+when you go to check the list of running domains:
+
+`sudo xm list`
+
+It's not there! Hooray we successfully cleanup up the domain!
