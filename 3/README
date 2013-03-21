@@ -1,0 +1,4 @@
+
+Concurrent reads to the disk. We're going to see some locking now
+
+Major implementation of a transactional data cache
