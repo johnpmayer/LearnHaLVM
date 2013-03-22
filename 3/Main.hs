@@ -1,11 +1,15 @@
 
+{-# OPTIONS -Wall #-}
+
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main where
 
 -- System Imports
 
 -- import Control.Concurrent (forkIO)
 
-import Data.Int (Int64)
+-- import Data.Int (Int64)
 
 import Foreign.Storable (peek, poke)
 
@@ -34,15 +38,25 @@ import DataCache
 xPrint :: String -> Xen ()
 xPrint s = writeConsole s >> writeConsole "\n"
 
-incrTask :: VPtr Int64 -> Xen ()
-incrTask ptr = do
-    i <- peek ptr
-    poke ptr $ i + 1
+incrTask :: PageCache a => a -> TaskID -> Xen ()
+incrTask dc task = do
+    ptr <- getPage task Exclusive 0 dc
+    page <- peek ptr
+    case page of
+        IndexPage () -> 
+            error "expected table"
+        TablePage i -> 
+            poke ptr $ TablePage $ i + 1
 
-observeTask :: VPtr Int64 -> Xen ()
-observeTask ptr = do
-    i <- peek ptr
-    xPrint $ "Value stored in page is " ++ show i
+observeTask :: PageCache a => a -> TaskID -> Xen ()
+observeTask dc task = do
+    ptr <- getPage task Shared 0 dc
+    page <- peek ptr
+    case page of
+        IndexPage () -> 
+            error "expected table"
+        TablePage i -> 
+            xPrint $ "Value stored in page is " ++ show i
 
 setupPage :: Xen (VPtr Char)
 setupPage = do
@@ -63,7 +77,7 @@ testWrite (name:_) ptr = do
             return ()
             
 start :: [String] -> Xen ()
-start args = do
+start _args = do
     xPrint "Xen Machine is on"
     page4K <- setupPage
     pDisks <- potentialDisks

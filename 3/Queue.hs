@@ -11,6 +11,9 @@ empty = Q [] []
 enqueue :: a -> Queue a -> Queue a
 enqueue x q = q { back = x : back q }
 
+peek :: Queue a -> Maybe a
+peek = snd . dequeue
+
 dequeue :: Queue a -> (Queue a, Maybe a)
 dequeue q@(Q [] []) = (q, Nothing)
 dequeue (Q (x:xs) _) = (Q xs [], Just x)
