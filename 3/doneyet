@@ -1,2 +1,3 @@
 
-grep '_' *.hs
+egrep '\s_(\w)+' *.hs
+egrep 'undefined' *.hs

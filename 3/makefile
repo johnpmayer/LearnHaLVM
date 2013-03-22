@@ -13,4 +13,5 @@ disk.img:
 .PHONY: run
 
 run:
+	sudo xend
 	sudo xm create Main.config -c

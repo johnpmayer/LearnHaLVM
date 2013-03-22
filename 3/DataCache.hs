@@ -1,6 +1,8 @@
 
 {-# OPTIONS -Wall #-}
 
+{-# LANGUAGE GADTs, TypeSynonymInstances #-}
+
 module DataCache where
 
 import Control.Concurrent (
@@ -39,21 +41,28 @@ import XenDevice.Disk (
     Disk,
     readBytes)
 
+import XUtils (xPrint)
+
 data LockType = Shared | Exclusive
 data IOLatch = MVar ()
-data Page = IndexPage () | TablePage Int
-type TaskID = MVar (VPtr Page)
-type PageAddr = Word64
 
+{-
+data Index
+data Table
+-}
+
+data Page = IndexPage () | TablePage Int
+{-
+data Page a where
+    IndexPage :: () -> Page Index
+    TablePage :: Int -> Page Table
+-}
 instance Storable Page where
     alignment = undefined
     sizeOf = undefined
 
-class PageCache t where
-  initialize :: Integer -> Disk -> Xen t
-  getPage :: TaskID -> LockType -> PageAddr -> t 
-          -> Xen (VPtr Page)
-  releasePage :: TaskID -> PageAddr -> t -> Xen ()
+type TaskID = MVar (VPtr Page)
+type PageAddr = Word64
 
 type TaskWaiting = (TaskID, LockType, Int)
 
@@ -65,12 +74,12 @@ data Status = Kernel PageAddr
 data DataCacheElem = DCE Status (Queue TaskWaiting)
 
 -- nice place for a GADT to only read pages in 'Kernel' and only write pages in 'Free'
-data DiskOperation = Read PageAddr | Write PageAddr 
+data DiskOperation = Read PageAddr | Write PageAddr deriving (Show)
 
 data DataCache = DC Disk (TVar (LRU Word64 DataCacheElem)) (TVar (Queue DiskOperation))
 
-initializeDC :: Integer -> Disk -> Xen DataCache
-initializeDC size disk = do
+initialize :: Disk -> Integer -> Xen DataCache
+initialize disk size = do
     alru <- newTVarIO . newLRU . Just $ size
     diskOps <- newTVarIO $ Queue.empty
     return $ DC disk alru diskOps
@@ -119,12 +128,13 @@ doDiskOp (DC disk tlru tDiskOps) = do
                         (Just task) -> putMVar task ptr
                 Write _page -> undefined
 
-getPageDC :: TaskID -> LockType -> PageAddr -> DataCache -> Xen (VPtr Page)
-getPageDC task lock page dc = do
+getPage :: TaskID -> LockType -> PageAddr -> DataCache -> Xen (VPtr Page)
+getPage task lock page dc = do
     mVPtr <- atomically (reservePageDC task lock page dc)
     case mVPtr of
         (Just ptr) -> return ptr
         Nothing    -> do 
+            xPrint "Page not in cache, forking disk read thread"
             _thread <- forkIO (doDiskOp dc)
             takeMVar task
 
@@ -166,10 +176,6 @@ reservePageDC task lock page (DC _ tlru tDiskOps) = do
             (HeldShared _ts _ptr) -> undefined
             (HeldExclusive _t _) -> undefined
 
-releasePageDC :: DataCache -> Word64 -> Xen ()
-releasePageDC = undefined
+releasePage :: DataCache -> Word64 -> Xen ()
+releasePage = undefined
 
-instance PageCache DataCache where
-  initialize = initializeDC
-  getPage = getPageDC
-  releasePage = undefined
