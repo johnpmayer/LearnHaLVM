@@ -3,9 +3,12 @@
 
 module DataCache where
 
+import Control.Concurrent (
+    forkIO)
 import Control.Concurrent.MVar (
     MVar,
-    putMVar)
+    putMVar,
+    takeMVar)
 
 import Control.Concurrent.STM (
     STM,
@@ -62,9 +65,9 @@ data Status = Kernel PageAddr
 data DataCacheElem = DCE Status (Queue TaskWaiting)
 
 -- nice place for a GADT to only read pages in 'Kernel' and only write pages in 'Free'
-data DiskOperation = Read PageAddr DataCacheElem | Write PageAddr DataCacheElem
+data DiskOperation = Read PageAddr | Write PageAddr 
 
-data DataCache = DC Disk (TVar (LRU Word64 DataCacheElem)) (TVar (Queue (TaskID, DiskOperation)))
+data DataCache = DC Disk (TVar (LRU Word64 DataCacheElem)) (TVar (Queue DiskOperation))
 
 initializeDC :: Integer -> Disk -> Xen DataCache
 initializeDC size disk = do
@@ -76,13 +79,14 @@ makeStatus :: TaskID -> LockType -> VPtr Page -> Status
 makeStatus task Shared    = HeldShared (Set.singleton task) 
 makeStatus task Exclusive = HeldExclusive task
 
-nextTask :: PageAddr -> VPtr Page -> DataCache -> STM (Maybe TaskID)
-nextTask page ptr (DC _ tlru _) = do
+-- TODO rename, since this is actually updating the lru
+nextTask :: PageAddr -> VPtr Page -> TVar (LRU PageAddr DataCacheElem) -> STM (Maybe TaskID)
+nextTask page ptr tlru = do
     lru <- readTVar tlru
     let (_, mdce) = LRU.lookup page lru
     case mdce of
         Nothing -> return Nothing
-        Just (DCE status twq) -> do
+        Just (DCE _status twq) -> do
             let (twq', mt) = Queue.dequeue twq
             case mt of
                 Nothing -> return Nothing
@@ -102,23 +106,27 @@ doDiskOp (DC disk tlru tDiskOps) = do
         return m
     case mDiskOp of
         Nothing -> return ()
-        (Just (task, diskOp)) -> do
+        (Just diskOp) -> do
             case diskOp of
-                Read page (DCE status twq) -> do
+                Read page -> do
                     ptr <- allocPage
                     _result <- readBytes disk page pageSize [ptr]
-                    -- check the result
-                    putMVar task ptr
                     -- go to the cache and find out who's next
+                    mTask <- atomically (nextTask page ptr tlru)
                     -- release to that thread
-                Write page dcElem -> undefined
+                    case mTask of 
+                        Nothing -> return ()
+                        (Just task) -> putMVar task ptr
+                Write _page -> undefined
 
 getPageDC :: TaskID -> LockType -> PageAddr -> DataCache -> Xen (VPtr Page)
-getPageDC task lock page dc@(DC _ tlru tDiskOps) = do
+getPageDC task lock page dc = do
     mVPtr <- atomically (reservePageDC task lock page dc)
     case mVPtr of
         (Just ptr) -> return ptr
-        Nothing    -> undefined
+        Nothing    -> do 
+            _thread <- forkIO (doDiskOp dc)
+            takeMVar task
 
 reservePageDC :: TaskID -> LockType -> PageAddr -> DataCache -> STM (Maybe (VPtr Page))
 reservePageDC task lock page (DC _ tlru tDiskOps) = do
@@ -128,9 +136,9 @@ reservePageDC task lock page (DC _ tlru tDiskOps) = do
             let dcElem = DCE (Kernel page) (Queue.enqueue (task, lock, 0) Queue.empty)
             let lru' = LRU.insert page dcElem lru
             writeTVar tlru lru'
-            let diskOp = Read page dcElem
+            let diskOp = Read page
             diskOps <- readTVar tDiskOps
-            let diskOps' = Queue.enqueue (task, diskOp) diskOps
+            let diskOps' = Queue.enqueue diskOp diskOps
             writeTVar tDiskOps diskOps'
             return Nothing
         (_, Just (DCE status twq)) -> case status of
