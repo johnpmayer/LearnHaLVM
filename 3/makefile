@@ -2,7 +2,7 @@
 all: Main disk.img
 
 Main: *.hs
-	halvm-ghc --make Main.hs
+	halvm-ghc -v --make Main.hs
 
 # This time we'll make a disk with 16 4K sectors
 

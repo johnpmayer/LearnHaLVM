@@ -26,6 +26,8 @@ import           Data.Cache.LRU (LRU, newLRU)
 import qualified Data.Cache.LRU as LRU
 import           Data.Word (Word64)
 
+import DeriveStorable
+
 import Foreign.Storable
 
 import Hypervisor.Basics (Xen)
@@ -46,20 +48,9 @@ import XUtils (xPrint)
 data LockType = Shared | Exclusive
 data IOLatch = MVar ()
 
-{-
-data Index
-data Table
--}
-
 data Page = IndexPage () | TablePage Int
-{-
-data Page a where
-    IndexPage :: () -> Page Index
-    TablePage :: Int -> Page Table
--}
-instance Storable Page where
-    alignment = undefined
-    sizeOf = undefined
+
+
 
 type TaskID = MVar (VPtr Page)
 type PageAddr = Word64
@@ -120,12 +111,15 @@ doDiskOp (DC disk tlru tDiskOps) = do
                 Read page -> do
                     ptr <- allocPage
                     _result <- readBytes disk page pageSize [ptr]
+                    xPrint $ "Read disk page " ++ show page ++ " into memory page " ++ show ptr
                     -- go to the cache and find out who's next
                     mTask <- atomically (nextTask page ptr tlru)
                     -- release to that thread
                     case mTask of 
                         Nothing -> return ()
-                        (Just task) -> putMVar task ptr
+                        (Just task) -> do
+                            xPrint "Returning ptr to next task"
+                            putMVar task ptr
                 Write _page -> undefined
 
 getPage :: TaskID -> LockType -> PageAddr -> DataCache -> Xen (VPtr Page)
