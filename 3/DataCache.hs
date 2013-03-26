@@ -26,7 +26,7 @@ import           Data.Cache.LRU (LRU, newLRU)
 import qualified Data.Cache.LRU as LRU
 import           Data.Word (Word64)
 
-import DeriveStorable
+-- import DeriveStorable
 
 import Foreign.Storable
 
